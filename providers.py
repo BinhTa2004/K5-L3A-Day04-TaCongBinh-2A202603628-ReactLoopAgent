@@ -1,8 +1,12 @@
 """Bốn provider cùng một interface. Không chứa agent loop."""
 import json
 import os
+import re
 import urllib.error
 import urllib.request
+from settings import load_env
+
+load_env()
 
 CONFIG = {
     'openai': ('OPENAI_API_KEY', 'https://api.openai.com/v1/chat/completions'),
@@ -12,14 +16,48 @@ CONFIG = {
 }
 
 
+def http_error_codes(exc):
+    """Chỉ lấy mã chẩn đoán, không đưa message/body của API vào trace."""
+    try:
+        data = json.loads(exc.read(65536))
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        error = data.get('error', {}) if isinstance(data, dict) else {}
+        if not isinstance(error, dict):
+            return []
+        candidates = [error.get('status')]
+        details = error.get('details', [])
+        if isinstance(details, list):
+            candidates.extend(item.get('reason') for item in details if isinstance(item, dict))
+        # Map known messages to fixed labels; never print the message itself.
+        message = error.get('message', '')
+        if isinstance(message, str):
+            if any(text in message.casefold() for text in ('api key not valid', 'invalid auth key')):
+                candidates.append('API_KEY_INVALID')
+            if 'user location is not supported' in message.casefold():
+                candidates.append('LOCATION_NOT_SUPPORTED')
+            if 'Unknown name "additionalProperties"' in message:
+                candidates.append('UNSUPPORTED_SCHEMA_ADDITIONAL_PROPERTIES')
+        allowed = []
+        for value in candidates:
+            if isinstance(value, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,79}', value) and value not in allowed:
+                allowed.append(value)
+        return allowed[:4]
+    except (ValueError, TypeError, OSError):
+        return []
+    finally:
+        exc.close()
+
+
 def post_json(url, headers, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
     try:
         with urllib.request.urlopen(req, timeout=60) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
+        codes = http_error_codes(exc)
+        diagnostic = f" ({', '.join(codes)})" if codes else ''
+        raise RuntimeError(f'Provider trả HTTP {exc.code}{diagnostic}; kiểm tra model, key và quota.') from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
 
@@ -30,12 +68,17 @@ class Provider:
     messages: system/user/assistant/tool theo format Chat Completions. message trả về
     cần được append nguyên vẹn; tool result có role, tool_call_id, content (JSON string).
     """
-    def __init__(self, name, model):
+    def __init__(self, name, model, json_mode=False):
         if name not in CONFIG:
             raise ValueError(f'Provider không hợp lệ: {name}')
         if not model:
             raise ValueError('Cần đặt MODEL là model có hỗ trợ tool calling.')
         self.name, self.model = name, model
+        self.json_mode = json_mode
+        token_limit = os.getenv('MAX_OUTPUT_TOKENS')
+        self.max_output_tokens = int(token_limit) if token_limit else None
+        if self.max_output_tokens is not None and self.max_output_tokens < 1:
+            raise ValueError('MAX_OUTPUT_TOKENS phải là số nguyên >= 1.')
         key_name, self.url = CONFIG[name]
         self.key = os.getenv(key_name)
         if not self.key:
@@ -45,6 +88,10 @@ class Provider:
         if self.name == 'anthropic':
             return self._anthropic(messages, schemas)
         payload = {'model': self.model, 'messages': messages}
+        if self.max_output_tokens is not None:
+            payload['max_tokens'] = self.max_output_tokens
+        if self.json_mode:
+            payload['response_format'] = {'type': 'json_object'}
         if schemas:
             payload['tools'] = schemas
         data = post_json(self.url, {'Authorization': f'Bearer {self.key}'}, payload)
@@ -75,7 +122,7 @@ class Provider:
             else:
                 native.append({'role': 'user', 'content': m['content']})
         tools = [{'name': x['function']['name'], 'description': x['function']['description'], 'input_schema': x['function']['parameters']} for x in schemas]
-        payload = {'model': self.model, 'max_tokens': 1024, 'system': system, 'messages': native}
+        payload = {'model': self.model, 'max_tokens': self.max_output_tokens or 1024, 'system': system, 'messages': native}
         if tools:
             payload['tools'] = tools
         data = post_json(self.url, {'x-api-key': self.key, 'anthropic-version': '2023-06-01'}, payload)

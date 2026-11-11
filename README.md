@@ -64,9 +64,13 @@ Chọn cấu hình khác nếu cần:
 | `anthropic` | `ANTHROPIC_API_KEY` | Tên model Claude hỗ trợ tool use. |
 | `openrouter` | `OPENROUTER_API_KEY` | Model ID đầy đủ trên OpenRouter, thường có dạng provider/model. |
 
-Ví dụ chuyển sang Gemini: `export PROVIDER=gemini`, đặt `GEMINI_API_KEY` và `MODEL` phù hợp. Chọn một provider; không cần cả bốn key. File `.env.example` chỉ là mẫu: chương trình **không tự đọc `.env`**. Có thể chạy `cp .env.example .env`, điền key rồi chạy `source .env` trong mỗi terminal mới. Trên Windows, dùng Git Bash để chạy đúng các lệnh này, hoặc thay `python3` bằng `python` và đặt biến bằng `$env:TEN_BIEN='gia_tri'` trong PowerShell. Không commit key hay trace chứa dữ liệu nhạy cảm.
+Ví dụ chuyển sang Gemini: đặt `PROVIDER=gemini`, `GEMINI_API_KEY` và `MODEL` phù hợp. Chọn một provider; không cần cả bốn key. Copy `.env.example` thành `.env`, điền key rồi lưu file: `run.py` và eval **tự nạp `.env` tại thư mục dự án**, không cần cài package hay chạy `source`. File hỗ trợ từng dòng `KEY=value`, comment trên dòng riêng và dấu nháy bao quanh giá trị; không thực thi lệnh hay nội suy biến. Biến đã đặt trong terminal được ưu tiên hơn `.env`; nếu từng đặt key/model cũ, hãy mở terminal mới hoặc xóa biến cũ. Trên PowerShell, thay `python3` bằng `python`; vẫn có thể đặt biến bằng `$env:TEN_BIEN='gia_tri'`. Không commit key hay trace chứa dữ liệu nhạy cảm.
 
 Adapter dùng Chat Completions cho OpenAI, Gemini compatibility và OpenRouter; Anthropic dùng Messages API. Nó phục vụ **tool calling cơ bản**, không bao phủ mọi tính năng đặc thù model như extended thinking. Khi provider từ chối model hoặc hết quota, kiểm tra quyền truy cập, model ID và key. Xem tài liệu: [OpenAI](https://developers.openai.com/api/docs/guides/function-calling), [Gemini](https://ai.google.dev/gemini-api/docs/openai), [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works), [OpenRouter](https://openrouter.ai/docs/guides/features/tool-calling).
+
+Có thể đặt `MAX_OUTPUT_TOKENS=2048` trong `.env` để giới hạn token đầu ra mỗi request của cả agent và judge. Giới hạn này giúp kiểm soát chi phí và mức credit dự phòng trên OpenRouter; nếu quá thấp, model có thể bị cắt output. Giữ cùng giá trị giữa hai lượt eval và ghi cấu hình này vào `NOTES.md`.
+
+Eval runner yêu cầu JSON mode riêng cho judge dùng OpenAI, Gemini hoặc OpenRouter (`response_format: json_object`); agent vẫn dùng định dạng trả lời thông thường. Với Anthropic, judge dùng chỉ dẫn JSON trong prompt. Báo cáo ghi `judge_json_mode` và `max_output_tokens` trong `config`. Khi thay cấu hình judge, chạy lại đầy đủ cả hai phiên bản để so sánh; không sửa tay hoặc ghép điểm vào báo cáo cũ.
 
 ## 2. Chạy thử
 

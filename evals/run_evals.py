@@ -22,7 +22,8 @@ def run_case(case, args):
     if not isinstance(result, dict) or not isinstance(result.get('trace', []), list):
         result = {'status': 'error', 'answer': '', 'trace': [], 'usage': [], 'error': 'run_agent trả kết quả không hợp lệ.'}
     try:
-        judge = Provider(args.judge_provider, args.judge_model)
+        judge = Provider(args.judge_provider, args.judge_model,
+                         json_mode=args.judge_provider != 'anthropic')
         grade = grade_case(case, result, judge)
     except Exception as exc:
         grade = {'score': None, 'status': 'unscored', 'reason': str(exc), 'judge_usage': {}}
@@ -65,7 +66,9 @@ def main():
         results = list(pool.map(run_and_print, selected))
     report = {'summary': summarize(results), 'config': {'provider': args.provider, 'model': args.model,
               'judge_provider': args.judge_provider, 'judge_model': args.judge_model, 'max_steps': args.max_steps,
-              'dataset': 'bonus' if args.bonus else 'core'}, 'cases': results}
+              'dataset': 'bonus' if args.bonus else 'core',
+              'judge_json_mode': args.judge_provider != 'anthropic',
+              'max_output_tokens': os.getenv('MAX_OUTPUT_TOKENS')}, 'cases': results}
     summary = report['summary']
     if args.bonus:
         full_run = not args.case and len(selected) == len(cases)
